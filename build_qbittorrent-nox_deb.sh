@@ -53,6 +53,23 @@ Description: Enhanced qBittorrent command-line client
  without the GUI interface.
 EOF
 
+# Create preinst
+cat > "$PACKAGE_DIR/DEBIAN/preinst" << 'EOF'
+#!/bin/sh
+set -e
+
+# 在升级或重新安装前，若服务正在运行则先停止，避免替换二进制时出现并发问题
+if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet qbittorrent-nox.service; then
+        systemctl stop qbittorrent-nox.service || true
+    fi
+fi
+
+exit 0
+EOF
+
+chmod +x "$PACKAGE_DIR/DEBIAN/preinst"
+
 # Create postinst
 cat > "$PACKAGE_DIR/DEBIAN/postinst" << 'EOF'
 #!/bin/sh
@@ -76,13 +93,19 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOS
 
-# 启用服务但不立即启动
+# 启用服务（重载 systemd 配置并启用服务）
 systemctl daemon-reload
 systemctl enable qbittorrent-nox.service
 
-# 首次安装时启动服务
-if [ "$1" = "configure" ] && [ -z "$2" ]; then
-    systemctl start qbittorrent-nox.service
+# 在配置阶段，首次安装应启动服务；升级时重启服务以加载新二进制
+if [ "$1" = "configure" ]; then
+    if [ -z "$2" ]; then
+        # fresh install
+        systemctl start qbittorrent-nox.service
+    else
+        # upgrade: try to restart, if restart fails try to start
+        systemctl restart qbittorrent-nox.service || systemctl start qbittorrent-nox.service
+    fi
 fi
 
 ldconfig
